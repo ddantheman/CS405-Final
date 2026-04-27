@@ -1,27 +1,48 @@
 import getpass
 import mysql.connector
-
+import os
 
 password = getpass.getpass("MySQL password: ")
 
 db = mysql.connector.connect(
-	unix_socket="/tmp/mysql.sock",
-	user="root",
-	password=password,
-	database="AfterSchoolClubs"
+    host="localhost",
+    user="alex",
+    password="alex123",
+    database="AfterSchoolClubs"
 )
 
 cursor = db.cursor()
 
 
 def show(sql, values=()):
-	try:
-		cursor.execute(sql, values)
-		print(cursor.column_names)
-		for row in cursor.fetchall():
-			print(row)
-	except mysql.connector.Error as error:
-		print("Error:", error)
+    try:
+        cursor.execute(sql, values)
+        rows = cursor.fetchall()
+        columns = cursor.column_names
+
+        # Compute max width for each column
+        col_widths = []
+        for i in range(len(columns)):
+            max_len = len(columns[i])
+            for row in rows:
+                max_len = max(max_len, len(str(row[i])))
+            col_widths.append(max_len)
+
+        # Print header
+        header = " | ".join(columns[i].ljust(col_widths[i]) for i in range(len(columns)))
+        print("\n" + header)
+
+        # Print separator
+        print("-" * len(header))
+
+        # Print rows
+        for row in rows:
+            print(" | ".join(str(row[i]).ljust(col_widths[i]) for i in range(len(row))))
+
+        input("\nPress Enter to return to menu...")
+
+    except mysql.connector.Error as error:
+        print("Error:", error)
 
 
 def change(sql, values=()):
@@ -48,8 +69,10 @@ def meeting_conflict(club_name, school_year, meeting_date, start_time, end_time,
 
 
 while True:
-	print()
+	os.system("clear")
+	print("==================================")
 	print("After-School Club Database")
+	print("==================================")
 	print("0. Quit")
 	print("1. View a table")
 	print("2. Add meeting")
@@ -94,6 +117,7 @@ while True:
 
 		if meeting_conflict(club_name, school_year, meeting_date, start_time, end_time, classroom_id):
 			print("Meeting not added because it has a scheduling conflict.")
+			input("\nPress Enter to return to menu...")
 		else:
 			sql = """
 				INSERT INTO Meetings
@@ -141,14 +165,40 @@ while True:
 		school_year = input("School year: ")
 		expense_id = input("Expense ID: ")
 		expense_date = input("Expense date YYYY-MM-DD: ")
-		amount = input("Amount: ")
+		amount = float(input("Amount: "))
 		description = input("Description: ")
+		# Get budget and current expenses
 		sql = """
-			INSERT INTO Expenses
-			(club_name, school_year, expense_id, expense_date, amount, expense_description)
-			VALUES (%s, %s, %s, %s, %s, %s)
+			SELECT yc.budget, IFNULL(SUM(e.amount), 0)
+			FROM YearlyClubs yc
+			LEFT JOIN Expenses e
+			ON yc.club_name = e.club_name AND yc.school_year = e.school_year
+			WHERE yc.club_name = %s AND yc.school_year = %s
+			GROUP BY yc.budget
 		"""
-		change(sql, (club_name, school_year, expense_id, expense_date, amount, description))
+		
+		cursor.execute(sql, (club_name, school_year))
+		result = cursor.fetchone()
+
+		if result:
+			budget, current_expenses = result
+			budget = float(budget)
+			current_expenses = float(current_expenses)
+
+			# Check if new expense exceeds budget
+			if current_expenses + amount > budget:
+				print("Cannot add expense: exceeds club budget.")
+				input("\nPress Enter to return to menu...")
+			else:
+				# Insert if valid
+				insert_sql = """
+					INSERT INTO Expenses
+					(club_name, school_year, expense_id, expense_date, amount, expense_description)
+					VALUES (%s, %s, %s, %s, %s, %s)
+				"""
+				change(insert_sql, (club_name, school_year, expense_id, expense_date, amount, description))
+		else:
+			print("Club/year not found.")
 
 	elif choice == "8":
 		club_name = input("Club name: ")
